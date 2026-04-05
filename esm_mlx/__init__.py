@@ -1,5 +1,7 @@
 """esm-mlx: ESM-2 protein language model on Apple MLX."""
 
+__version__ = "0.1.0"
+
 from .model import ESM2, MODEL_CONFIGS
 from .tokenizer import Tokenizer
 from .layers import MultiHeadAttention, TransformerLayer
