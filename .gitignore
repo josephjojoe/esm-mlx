@@ -1,5 +1,6 @@
 drafts/
-*.safetensors
+weights/
+results/
 __pycache__/
 *.csv
 *.egg-info/

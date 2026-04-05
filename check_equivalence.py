@@ -4,7 +4,8 @@ Check numerical equivalence between PyTorch ESM2 and the MLX port.
 Requires PyTorch ESM2 (downloaded via torch.hub) and converted MLX weights.
 
 Usage:
-    python check_equivalence.py [--weights esm2_t33_650M_UR50D.safetensors] [--diagnose]
+    python3 check_equivalence.py [--diagnose]
+    python3 check_equivalence.py --dtype float16 [--diagnose]
 """
 
 import argparse
@@ -29,10 +30,21 @@ def load_pytorch_model():
     return model, alphabet, batch_converter
 
 
-def load_mlx_model(weights_path):
+def load_mlx_model(weights_path, dtype="float32"):
+    from mlx.utils import tree_flatten, tree_map
+
     model = ESM2()
     weights = mx.load(weights_path)
     model.load_weights(list(weights.items()))
+
+    if dtype == "float16":
+        casted = tree_map(
+            lambda x: x.astype(mx.float16) if isinstance(x, mx.array) else x,
+            model.parameters(),
+        )
+        model.load_weights(list(tree_flatten(casted)))
+
+    mx.eval(model.parameters())
     return model
 
 
@@ -89,35 +101,6 @@ def worst_positions(name, pt_np, mx_np, tokens_np=None, top_k=5):
 
 # ── Layer-by-layer diagnostics ──────────────────────────────────────────────
 
-# WARNING: This reimplements the ESM2 forward pass to capture per-layer outputs.
-# Must be kept in sync with ESM2.__call__ in model.py.
-def run_mlx_layerwise(mx_model, tokens):
-    intermediates = {}
-    padding_mask = tokens == mx_model.padding_idx
-    mask = padding_mask if padding_mask.any() else None
-
-    x = mx_model.embed_tokens(tokens) * 0.88
-    if mask is not None:
-        x = x * (~mx.expand_dims(mask, -1)).astype(x.dtype)
-    mx.eval(x)
-    intermediates[0] = x
-
-    for i, layer in enumerate(mx_model.layers):
-        x, _ = layer(x, mask=mask, need_head_weights=False)
-        mx.eval(x)
-        intermediates[i + 1] = x
-
-    x = mx_model.emb_layer_norm_after(x)
-    mx.eval(x)
-    intermediates["post_norm"] = x
-
-    logits = mx_model.lm_head(x, mx_model.embed_tokens.weight)
-    mx.eval(logits)
-    intermediates["logits"] = logits
-
-    return intermediates
-
-
 def diagnose_layerwise(pt_model, mx_model, batch_tokens):
     print("\n" + "=" * 70)
     print("LAYER-BY-LAYER DIAGNOSTIC")
@@ -128,20 +111,25 @@ def diagnose_layerwise(pt_model, mx_model, batch_tokens):
     non_pad = tokens_np != PADDING_IDX
 
     all_layers = list(range(pt_model.num_layers + 1))
+
     with torch.no_grad():
         pt_out = pt_model(batch_tokens, repr_layers=all_layers, need_head_weights=False)
     pt_reprs = pt_out["representations"]
     pt_logits = pt_out["logits"]
 
-    mx_intermediates = run_mlx_layerwise(mx_model, mx_tokens)
+    mx_out = mx_model(mx_tokens, repr_layers=all_layers)
+    mx.eval(mx_out["logits"])
+    mx_reprs = mx_out["representations"]
 
-    print(f"\n  {'Stage':<16} {'max_diff':>12} {'mean_diff':>12}  {'nonpad_max':>12}")
-    print("  " + "-" * 60)
+    header = (f"  {'Stage':<16} {'max_diff':>12} {'mean_diff':>12}"
+              f"  {'nonpad_max':>12} {'rel_l2':>10}")
+    print(f"\n{header}")
+    print("  " + "-" * 68)
 
     prev_max = 0
     for layer_idx in range(pt_model.num_layers):
         pt_np = to_np(pt_reprs[layer_idx])
-        mx_np = to_np(mx_intermediates[layer_idx])
+        mx_np = to_np(mx_reprs[layer_idx])
         diff = np.abs(pt_np - mx_np)
         max_d = float(np.max(diff))
         mean_d = float(np.mean(diff))
@@ -149,37 +137,64 @@ def diagnose_layerwise(pt_model, mx_model, batch_tokens):
         per_pos = diff.max(axis=-1)
         nonpad_max = float(per_pos[non_pad].max()) if non_pad.any() else max_d
 
+        diff_norm = np.linalg.norm(pt_np - mx_np, axis=-1)
+        ref_norm = np.linalg.norm(pt_np, axis=-1)
+        rel_l2_per_pos = diff_norm / (ref_norm + 1e-8)
+        rel_l2 = float(rel_l2_per_pos[non_pad].max()) if non_pad.any() else float(rel_l2_per_pos.max())
+
         growth = ""
         if prev_max > 0 and max_d > prev_max:
             growth = f" ({max_d / prev_max:.1f}x)"
         prev_max = max_d if max_d > 0 else prev_max
 
         label = "embed" if layer_idx == 0 else f"layer {layer_idx}"
-        print(f"  {label:<16} {max_d:>12.6e} {mean_d:>12.6e}  {nonpad_max:>12.6e}{growth}")
+        print(f"  {label:<16} {max_d:>12.6e} {mean_d:>12.6e}"
+              f"  {nonpad_max:>12.6e} {rel_l2:>9.4e}{growth}")
 
-    pt_postnorm = to_np(pt_reprs[pt_model.num_layers])
-    mx_postnorm = to_np(mx_intermediates["post_norm"])
-    diff = np.abs(pt_postnorm - mx_postnorm)
-    max_d, mean_d = float(np.max(diff)), float(np.mean(diff))
-    nonpad_max = float(diff.max(axis=-1)[non_pad].max()) if non_pad.any() else max_d
-    print(f"  {'post_norm':<16} {max_d:>12.6e} {mean_d:>12.6e}  {nonpad_max:>12.6e}")
-
-    pt_l = to_np(pt_logits)
-    mx_l = to_np(mx_intermediates["logits"])
-    diff = np.abs(pt_l - mx_l)
-    max_d, mean_d = float(np.max(diff)), float(np.mean(diff))
-    nonpad_max = float(diff.max(axis=-1)[non_pad].max()) if non_pad.any() else max_d
-    print(f"  {'logits':<16} {max_d:>12.6e} {mean_d:>12.6e}  {nonpad_max:>12.6e}")
+    for stage_key, stage_label in [(pt_model.num_layers, "post_norm"), ("logits", "logits")]:
+        if stage_label == "logits":
+            pt_np = to_np(pt_logits)
+            mx_np = to_np(mx_out["logits"])
+        else:
+            pt_np = to_np(pt_reprs[stage_key])
+            mx_np = to_np(mx_reprs[stage_key])
+        diff = np.abs(pt_np - mx_np)
+        max_d, mean_d = float(np.max(diff)), float(np.mean(diff))
+        nonpad_max = float(diff.max(axis=-1)[non_pad].max()) if non_pad.any() else max_d
+        diff_norm = np.linalg.norm(pt_np - mx_np, axis=-1)
+        ref_norm = np.linalg.norm(pt_np, axis=-1)
+        rel_l2_per_pos = diff_norm / (ref_norm + 1e-8)
+        rel_l2 = float(rel_l2_per_pos[non_pad].max()) if non_pad.any() else float(rel_l2_per_pos.max())
+        print(f"  {stage_label:<16} {max_d:>12.6e} {mean_d:>12.6e}"
+              f"  {nonpad_max:>12.6e} {rel_l2:>9.4e}")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-def main(weights_path, diagnose=False):
-    print("Loading PyTorch model...")
+TOLERANCES = {
+    "float32": {"logits": 5e-3, "contacts": 1e-3},
+    "float16": {"logits": 1.0, "contacts": 0.05},
+}
+
+
+def check_logits(pt_logits, mx_logits, non_pad, atol, label):
+    """Compare logits and return (passed, max_diff, mean_diff)."""
+    diff = np.abs(pt_logits - mx_logits)
+    per_pos = diff.max(axis=-1)
+    max_d = float(per_pos[non_pad].max())
+    mean_d = float(per_pos[non_pad].mean())
+    ok = max_d < atol
+    status = "PASS" if ok else "FAIL"
+    print(f"  [{status}] {label}: max_diff={max_d:.6e}, mean_diff={mean_d:.6e} (atol={atol})")
+    return ok, per_pos
+
+
+def main(weights_path, diagnose=False, dtype="float32"):
+    print(f"Loading PyTorch model (fp32 reference)...")
     pt_model, alphabet, batch_converter = load_pytorch_model()
 
-    print("Loading MLX model...")
-    mx_model = load_mlx_model(weights_path)
+    print(f"Loading MLX model ({dtype})...")
+    mx_model = load_mlx_model(weights_path, dtype=dtype)
 
     test_sequences = [
         ("protein1", "MKTAYIAKQRQISFVKSHFSRQLE"),
@@ -187,14 +202,35 @@ def main(weights_path, diagnose=False):
     ]
 
     _, _, batch_tokens = batch_converter(test_sequences)
+    mx_tokens = mx.array(batch_tokens.numpy())
+    tokens_np = batch_tokens.numpy()
+    non_pad = tokens_np != PADDING_IDX
+
     print(f"\nInput shape: {batch_tokens.shape}")
 
-    print("\nRunning PyTorch model...")
+    atol_logits = TOLERANCES[dtype]["logits"]
+    atol_contacts = TOLERANCES[dtype]["contacts"]
+
+    # ── Pass 1: SDPA path (normal inference) ─────────────────────────────
+    print("\n--- Pass 1: fused SDPA path (return_contacts=False) ---")
+
+    with torch.no_grad():
+        pt_out_sdpa = pt_model(batch_tokens, return_contacts=False)
+    mx_out_sdpa = mx_model(mx_tokens, return_contacts=False)
+    mx.eval(mx_out_sdpa["logits"])
+
+    pt_logits_sdpa = to_np(pt_out_sdpa["logits"])
+    mx_logits_sdpa = to_np(mx_out_sdpa["logits"])
+
+    sdpa_ok, _ = check_logits(
+        pt_logits_sdpa, mx_logits_sdpa, non_pad, atol_logits, "logits (sdpa)",
+    )
+
+    # ── Pass 2: manual attention path (contact prediction) ───────────────
+    print("\n--- Pass 2: manual attention path (return_contacts=True) ---")
+
     with torch.no_grad():
         pt_out = pt_model(batch_tokens, return_contacts=True)
-
-    print("Running MLX model...")
-    mx_tokens = mx.array(batch_tokens.numpy())
     mx_out = mx_model(mx_tokens, return_contacts=True)
     mx.eval(mx_out["logits"], mx_out["contacts"])
 
@@ -202,38 +238,29 @@ def main(weights_path, diagnose=False):
     mx_logits = to_np(mx_out["logits"])
     pt_contacts = to_np(pt_out["contacts"])
     mx_contacts = to_np(mx_out["contacts"])
-    tokens_np = batch_tokens.numpy()
-    non_pad = tokens_np != PADDING_IDX
 
-    logit_diff = np.abs(pt_logits - mx_logits)
-    per_pos_logit = logit_diff.max(axis=-1)  # (B, T)
-    nonpad_logit_max = float(per_pos_logit[non_pad].max())
-    nonpad_logit_mean = float(per_pos_logit[non_pad].mean())
+    attn_logits_ok, per_pos_logit = check_logits(
+        pt_logits, mx_logits, non_pad, atol_logits, "logits (attn)",
+    )
 
     contact_diff = np.abs(pt_contacts - mx_contacts)
     contact_max = float(contact_diff.max())
     contact_mean = float(contact_diff.mean())
-
-    tk = topk_agreement(pt_logits, mx_logits)
-
-    pt_preds = np.argmax(pt_logits, axis=-1)
-    mx_preds = np.argmax(mx_logits, axis=-1)
-    token_match = float(np.mean(pt_preds[non_pad] == mx_preds[non_pad]))
-
-    print("\nResults (non-padding positions):")
-
-    logits_ok = nonpad_logit_max < 5e-3
-    contacts_ok = contact_max < 1e-3
-    all_passed = logits_ok and contacts_ok
-
-    status = "PASS" if logits_ok else "FAIL"
-    print(f"  [{status}] logits:   max_diff={nonpad_logit_max:.6e}, mean_diff={nonpad_logit_mean:.6e} (atol=5e-3)")
+    contacts_ok = contact_max < atol_contacts
     status = "PASS" if contacts_ok else "FAIL"
-    print(f"  [{status}] contacts: max_diff={contact_max:.6e}, mean_diff={contact_mean:.6e} (atol=1e-3)")
+    print(f"  [{status}] contacts: max_diff={contact_max:.6e}, mean_diff={contact_mean:.6e} (atol={atol_contacts})")
+
+    # ── Summary ──────────────────────────────────────────────────────────
+    tk = topk_agreement(pt_logits_sdpa, mx_logits_sdpa)
+    pt_preds = np.argmax(pt_logits_sdpa, axis=-1)
+    mx_preds = np.argmax(mx_logits_sdpa, axis=-1)
+    token_match = float(np.mean(pt_preds[non_pad] == mx_preds[non_pad]))
 
     print(f"\n  Token prediction agreement: {token_match * 100:.1f}%")
     for k, v in tk.items():
         print(f"  Top-{k} agreement: {v * 100:.1f}%")
+
+    all_passed = sdpa_ok and attn_logits_ok and contacts_ok
 
     if all_passed:
         print("\nAll checks passed.")
@@ -245,7 +272,7 @@ def main(weights_path, diagnose=False):
         print("LOGIT ERROR ANALYSIS")
         print("=" * 70)
 
-        error_distribution("logits", pt_logits, mx_logits)
+        error_distribution("logits (attn path)", pt_logits, mx_logits)
         print()
         error_distribution("contacts", pt_contacts, mx_contacts)
         print()
@@ -254,7 +281,7 @@ def main(weights_path, diagnose=False):
         pad_mask = tokens_np == PADDING_IDX
         pad_logit_max = float(per_pos_logit[pad_mask].max()) if pad_mask.any() else 0
         print(f"\n  Max logit error (padding):     {pad_logit_max:.6e}")
-        print(f"  Max logit error (non-padding): {nonpad_logit_max:.6e}")
+        print(f"  Max logit error (non-padding): {float(per_pos_logit[non_pad].max()):.6e}")
 
         diagnose_layerwise(pt_model, mx_model, batch_tokens)
         print()
@@ -266,8 +293,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Check numerical equivalence between PyTorch ESM2 and the MLX port."
     )
-    parser.add_argument("--weights", default="esm2_t33_650M_UR50D.safetensors")
+    parser.add_argument("--weights", default="weights/esm2_t33_650M_UR50D.safetensors")
+    parser.add_argument("--dtype", choices=["float32", "float16"], default="float32",
+                        help="Data type for MLX model (PyTorch reference always runs fp32)")
     parser.add_argument("--diagnose", action="store_true",
                         help="Run deep layer-by-layer diagnostics")
     args = parser.parse_args()
-    sys.exit(main(args.weights, diagnose=args.diagnose))
+    sys.exit(main(args.weights, diagnose=args.diagnose, dtype=args.dtype))

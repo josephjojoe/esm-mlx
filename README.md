@@ -8,8 +8,12 @@ This is a from-scratch MLX implementation of Meta's [ESM-2](https://github.com/f
 
 | Model | Layers | Hidden Dim | Heads | Parameters |
 |-------|--------|-----------|-------|------------|
+| `esm2_t6_8M_UR50D` | 6 | 320 | 20 | 8M |
+| `esm2_t12_35M_UR50D` | 12 | 480 | 20 | 35M |
+| `esm2_t30_150M_UR50D` | 30 | 640 | 20 | 150M |
 | `esm2_t33_650M_UR50D` | 33 | 1280 | 20 | 650M |
 | `esm2_t36_3B_UR50D` | 36 | 2560 | 40 | 3B |
+| `esm2_t48_15B_UR50D` | 48 | 5120 | 40 | 15B |
 
 ## Installation
 
@@ -32,13 +36,13 @@ pip install -e ".[convert]"
 Convert the official PyTorch weights to MLX-compatible safetensors:
 
 ```bash
-python convert_weights.py --model esm2_t33_650M_UR50D
+python3 convert_weights.py --model esm2_t33_650M_UR50D
 ```
 
-This downloads the model from `torch.hub` and saves `esm2_t33_650M_UR50D.safetensors` in the current directory. For the 3B model:
+This downloads the model from `torch.hub` and saves `weights/esm2_t33_650M_UR50D.safetensors`. For the 3B model:
 
 ```bash
-python convert_weights.py --model esm2_t36_3B_UR50D
+python3 convert_weights.py --model esm2_t36_3B_UR50D
 ```
 
 ## Quick Start
@@ -88,16 +92,22 @@ model.__call__ = mx.compile(model.__call__, inputs=model.state)
 Verify numerical equivalence against the official PyTorch implementation:
 
 ```bash
-python check_equivalence.py
+python3 check_equivalence.py
 ```
 
 Add `--diagnose` for layer-by-layer error analysis:
 
 ```bash
-python check_equivalence.py --diagnose
+python3 check_equivalence.py --diagnose
 ```
 
-On non-padding positions, typical max error is ~3e-3 (normal float32 drift across 33 layers on different backends).
+To verify FP16 faithfulness (looser tolerances, comparing fp16 MLX against fp32 PyTorch):
+
+```bash
+python3 check_equivalence.py --dtype float16
+```
+
+On non-padding positions, typical max error is ~3e-3 for fp32 (normal float32 drift across 33 layers on different backends).
 
 ## Benchmarks
 
@@ -140,11 +150,11 @@ FP16 widens the gap significantly. The **3.39x** result at batch=16, seq=1024 li
 Run your own benchmarks:
 
 ```bash
-python benchmark.py --csv results.csv
-python benchmark.py --dtype float16 --csv results_fp16.csv
+python3 benchmark.py --csv
+python3 benchmark.py --dtype float16 --csv
 ```
 
-See `python benchmark.py --help` for options (dtype, batch sizes, sequence lengths, etc.).
+See `python3 benchmark.py --help` for options (dtype, batch sizes, sequence lengths, etc.).
 
 ## API Reference
 

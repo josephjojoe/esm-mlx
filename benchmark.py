@@ -1,6 +1,7 @@
 import argparse
 import csv
 import gc
+import os
 import platform
 import statistics
 import subprocess
@@ -349,7 +350,7 @@ def main():
         description="Benchmark MLX ESM-2 vs PyTorch ESM-2 (MPS) inference speed.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--weights", default="esm2_t33_650M_UR50D.safetensors",
+    parser.add_argument("--weights", default="weights/esm2_t33_650M_UR50D.safetensors",
                         help="Path to converted MLX safetensors")
     parser.add_argument("--warmup", type=int, default=WARMUP_ITERS,
                         help="Warmup iterations (not timed)")
@@ -362,8 +363,8 @@ def main():
     parser.add_argument("--dtype", choices=["float32", "float16"],
                         default="float32",
                         help="Data type for model weights and computation")
-    parser.add_argument("--csv", type=str, default=None,
-                        help="Write results to CSV")
+    parser.add_argument("--csv", nargs="?", const="auto", default=None,
+                        help="Write results to CSV (default: results/<dtype>.csv)")
     parser.add_argument("--mlx-only", action="store_true")
     parser.add_argument("--pytorch-only", action="store_true")
     parser.add_argument("--no-sanity-check", action="store_true",
@@ -453,7 +454,12 @@ def main():
                       dtype=args.dtype)
 
     if args.csv:
-        save_csv(all_results, args.csv)
+        csv_path = args.csv
+        if csv_path == "auto":
+            model_tag = os.path.splitext(os.path.basename(args.weights))[0]
+            csv_path = os.path.join("results", f"{model_tag}_{DTYPE_TAGS[args.dtype]}.csv")
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        save_csv(all_results, csv_path)
 
 
 if __name__ == "__main__":

@@ -45,15 +45,16 @@ class MultiHeadAttention(nn.Module):
         k = self.rope(k)
 
         if need_head_weights:
-            scores = (q * self.scale) @ k.transpose(0, 1, 3, 2)
+            q_f32, k_f32 = q.astype(mx.float32), k.astype(mx.float32)
+            scores = (q_f32 * self.scale) @ k_f32.transpose(0, 1, 3, 2)
             if mask is not None:
-                scores = scores + mask.reshape(B, 1, 1, T).astype(scores.dtype) * -1e9
-            weights = mx.softmax(scores.astype(mx.float32), axis=-1).astype(scores.dtype)
+                scores = scores + mask.reshape(B, 1, 1, T).astype(mx.float32) * -1e9
+            weights = mx.softmax(scores, axis=-1).astype(q.dtype)
             out = weights @ v
         else:
             sdpa_mask = None
             if mask is not None:
-                sdpa_mask = mask.reshape(B, 1, 1, T).astype(q.dtype) * -1e9
+                sdpa_mask = (mask.reshape(B, 1, 1, T).astype(mx.float32) * -1e9).astype(q.dtype)
             out = mx.fast.scaled_dot_product_attention(
                 q, k, v, scale=self.scale, mask=sdpa_mask,
             )

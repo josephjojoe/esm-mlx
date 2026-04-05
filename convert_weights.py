@@ -6,10 +6,11 @@ MLX implementation recomputes (RoPE frequencies, bias_k/v).
 
 Usage::
 
-    python convert_weights.py --model esm2_t33_650M_UR50D --out esm2_t33_650M_UR50D.safetensors
+    python3 convert_weights.py --model esm2_t33_650M_UR50D
 """
 
 import argparse
+import os
 
 import numpy as np
 import torch
@@ -64,7 +65,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--out",
         default=None,
-        help="Output path (default: <model>.safetensors)",
+        help="Output path (default: weights/<model>.safetensors)",
     )
     args = parser.parse_args()
 
@@ -74,5 +75,6 @@ if __name__ == "__main__":
             f"Choose from: {list(MODEL_CONFIGS)}"
         )
 
-    out_path = args.out or f"{args.model}.safetensors"
+    out_path = args.out or os.path.join("weights", f"{args.model}.safetensors")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     convert(args.model, out_path)
