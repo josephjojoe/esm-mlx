@@ -7,8 +7,8 @@ prediction via stacked attention maps.
 import mlx.core as mx
 import mlx.nn as nn
 
-from layers import MultiHeadAttention, TransformerLayer
-from heads import RobertaLMHead, ContactPredictionHead
+from .layers import MultiHeadAttention, TransformerLayer
+from .heads import RobertaLMHead, ContactPredictionHead
 
 # Architecture configs keyed by the official Facebook Research model names.
 # Each maps to (num_layers, embed_dim, attention_heads, alphabet_size).

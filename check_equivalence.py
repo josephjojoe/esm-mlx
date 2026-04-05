@@ -4,7 +4,7 @@ Check numerical equivalence between PyTorch ESM2 and the MLX port.
 Requires PyTorch ESM2 (downloaded via torch.hub) and converted MLX weights.
 
 Usage:
-    python check_equivalence.py --weights weights.safetensors [--diagnose]
+    python check_equivalence.py [--weights esm2_t33_650M_UR50D.safetensors] [--diagnose]
 """
 
 import argparse
@@ -15,7 +15,7 @@ import torch
 
 import mlx.core as mx
 
-from model import ESM2
+from esm_mlx import ESM2
 
 PADDING_IDX = 1
 
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Check numerical equivalence between PyTorch ESM2 and the MLX port."
     )
-    parser.add_argument("--weights", default="weights.safetensors")
+    parser.add_argument("--weights", default="esm2_t33_650M_UR50D.safetensors")
     parser.add_argument("--diagnose", action="store_true",
                         help="Run deep layer-by-layer diagnostics")
     args = parser.parse_args()

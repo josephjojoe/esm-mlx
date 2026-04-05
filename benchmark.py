@@ -1,7 +1,6 @@
 import argparse
 import csv
 import gc
-import os
 import platform
 import statistics
 import subprocess
@@ -200,7 +199,7 @@ def pytorch_logits_np(model, tokens_np: np.ndarray) -> np.ndarray:
 def load_mlx_model(weights_path: str, dtype: str = "float32"):
     import mlx.core as mx
     from mlx.utils import tree_flatten, tree_map
-    from model import ESM2
+    from esm_mlx import ESM2
 
     model = ESM2()
     weights = mx.load(weights_path)
@@ -350,7 +349,7 @@ def main():
         description="Benchmark MLX ESM-2 vs PyTorch ESM-2 (MPS) inference speed.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--weights", default="weights.safetensors",
+    parser.add_argument("--weights", default="esm2_t33_650M_UR50D.safetensors",
                         help="Path to converted MLX safetensors")
     parser.add_argument("--warmup", type=int, default=WARMUP_ITERS,
                         help="Warmup iterations (not timed)")

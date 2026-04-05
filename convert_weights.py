@@ -15,6 +15,8 @@ import numpy as np
 import torch
 from safetensors.numpy import save_file
 
+from esm_mlx import MODEL_CONFIGS
+
 # Keys to skip: RoPE buffers recomputed by MLX, and unused bias projections.
 SKIP_SUFFIXES = (
     "rot_emb.inv_freq",
@@ -65,6 +67,12 @@ if __name__ == "__main__":
         help="Output path (default: <model>.safetensors)",
     )
     args = parser.parse_args()
+
+    if args.model not in MODEL_CONFIGS:
+        parser.error(
+            f"Unknown model {args.model!r}. "
+            f"Choose from: {list(MODEL_CONFIGS)}"
+        )
 
     out_path = args.out or f"{args.model}.safetensors"
     convert(args.model, out_path)

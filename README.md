@@ -16,12 +16,12 @@ This is a from-scratch MLX implementation of Meta's [ESM-2](https://github.com/f
 Requires Python 3.10+ and an Apple Silicon Mac.
 
 ```bash
-git clone https://github.com/your-username/esm-mlx.git
+git clone https://github.com/jojoe-ainmo/esm-mlx.git
 cd esm-mlx
 pip install -e .
 ```
 
-To also install PyTorch (needed for weight conversion and equivalence checking):
+To also install PyTorch (needed for weight conversion, equivalence checking, and benchmarks):
 
 ```bash
 pip install -e ".[convert]"
@@ -45,8 +45,7 @@ python convert_weights.py --model esm2_t36_3B_UR50D
 
 ```python
 import mlx.core as mx
-from model import ESM2
-from tokenizer import Tokenizer
+from esm_mlx import ESM2, Tokenizer
 
 # Load the model
 model = ESM2.from_pretrained("esm2_t33_650M_UR50D")
@@ -89,13 +88,13 @@ model.__call__ = mx.compile(model.__call__, inputs=model.state)
 Verify numerical equivalence against the official PyTorch implementation:
 
 ```bash
-python check_equivalence.py --weights esm2_t33_650M_UR50D.safetensors
+python check_equivalence.py
 ```
 
 Add `--diagnose` for layer-by-layer error analysis:
 
 ```bash
-python check_equivalence.py --weights esm2_t33_650M_UR50D.safetensors --diagnose
+python check_equivalence.py --diagnose
 ```
 
 On non-padding positions, typical max error is ~3e-3 (normal float32 drift across 33 layers on different backends).
@@ -125,7 +124,7 @@ The MLX advantage grows with batch size and sequence length. At batch=8, seq=102
 Run your own benchmarks:
 
 ```bash
-python benchmark.py --weights esm2_t33_650M_UR50D.safetensors --csv results.csv
+python benchmark.py --csv results.csv
 ```
 
 See `python benchmark.py --help` for options (dtype, batch sizes, sequence lengths, etc.).
@@ -138,7 +137,7 @@ The main model class.
 
 - **`ESM2(num_layers, embed_dim, attention_heads, ...)`** — Construct with explicit config.
 - **`ESM2.from_pretrained(model_name, weights_path=None)`** — Load a pretrained model by name.
-- **`model(tokens, return_contacts=False)`** — Forward pass. Returns `{"logits": ..., "contacts": ...}`.
+- **`model(tokens, return_contacts=False)`** — Forward pass. Returns `{"logits": ...}`, or `{"logits": ..., "contacts": ...}` when `return_contacts=True`.
 - **`model.predict_contacts(tokens)`** — Shorthand for contact prediction only.
 
 ### `Tokenizer`
@@ -154,7 +153,7 @@ Standalone tokenizer (no PyTorch dependency).
 Dict mapping model names to architecture parameters:
 
 ```python
-from model import MODEL_CONFIGS
+from esm_mlx import MODEL_CONFIGS
 print(MODEL_CONFIGS["esm2_t33_650M_UR50D"])
 # {'num_layers': 33, 'embed_dim': 1280, 'attention_heads': 20}
 ```
@@ -174,14 +173,17 @@ The implementation mirrors the original ESM-2 architecture:
 
 ```
 esm-mlx/
-├── model.py              # ESM2 model class and configs
-├── layers.py             # MultiHeadAttention, TransformerLayer
-├── heads.py              # RobertaLMHead, ContactPredictionHead
-├── tokenizer.py          # Standalone ESM-2 tokenizer
-├── convert_weights.py    # PyTorch → safetensors converter
-├── check_equivalence.py  # Numerical equivalence tests
-├── benchmark.py          # MLX vs PyTorch MPS benchmarks
-└── pyproject.toml        # Package metadata and dependencies
+├── esm_mlx/
+│   ├── __init__.py           # Public API exports
+│   ├── model.py              # ESM2 model class and configs
+│   ├── layers.py             # MultiHeadAttention, TransformerLayer
+│   ├── heads.py              # RobertaLMHead, ContactPredictionHead
+│   └── tokenizer.py          # Standalone ESM-2 tokenizer
+├── convert_weights.py        # PyTorch → safetensors converter
+├── check_equivalence.py      # Numerical equivalence tests
+├── benchmark.py              # MLX vs PyTorch MPS benchmarks
+├── pyproject.toml            # Package metadata and dependencies
+└── LICENSE                   # MIT license
 ```
 
 ## License
