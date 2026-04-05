@@ -195,6 +195,7 @@ def pytorch_logits_np(model, tokens_np: np.ndarray) -> np.ndarray:
 
 def load_mlx_model(weights_path: str):
     import mlx.core as mx
+    from mlx import utils as mx_utils
     from model import ESM2
 
     model = ESM2()
@@ -202,7 +203,7 @@ def load_mlx_model(weights_path: str):
     model.load_weights(list(weights.items()))
     mx.eval(model.parameters())
 
-    n_params = sum(v.size for _, v in mx.utils.tree_flatten(model.parameters()))
+    n_params = sum(v.size for _, v in mx_utils.tree_flatten(model.parameters()))
     print(f"  MLX params:     {n_params / 1e6:.1f}M")
 
     model.__call__ = mx.compile(model.__call__, inputs=model.state)
