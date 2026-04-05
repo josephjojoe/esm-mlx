@@ -1,29 +1,72 @@
-# TODO: Batch encoding 
+"""Standalone tokenizer for ESM-2.
+
+Provides the same vocabulary and encoding as the official ESM-2 alphabet
+without requiring PyTorch or the ``facebookresearch/esm`` package.
+"""
+
+import mlx.core as mx
+
+
+# Standard amino-acid tokens in ESM-2 canonical order.
+STANDARD_TOKS = list("LAGVSERTIDPKQNFYMHWCXBUZO.-")
+
+# Full vocabulary: special tokens + amino acids + null padding + mask.
+VOCAB = ["<cls>", "<pad>", "<eos>", "<unk>"] + STANDARD_TOKS + ["<null_1>", "<mask>"]
+
 
 class Tokenizer:
+    """ESM-2 tokenizer.
+
+    Encodes protein sequences into integer token arrays compatible with
+    :class:`model.ESM2`.  Handles single sequences and batches with automatic
+    padding.
+
+    Example::
+
+        tok = Tokenizer()
+        tokens = tok.encode("MKTAYIAK")       # single sequence -> mx.array
+        tokens = tok.batch_encode(["MKTAYIAK", "KALTARQ"])  # batch -> mx.array
+    """
+
     def __init__(self):
-        standard_toks = ['L', 'A', 'G', 'V', 'S', 'E', 'R', 'T', 'I', 'D', 'P', 'K', 'Q', 'N', 'F', 'Y', 'M', 'H', 'W', 'C', 'X', 'B', 'U', 'Z', 'O', '.', '-']
-        prepend = ["<cls>", "<pad>", "<eos>", "<unk>"]
-        append  = ["<mask>"]
-        # Align to a multiple of 8 with the null token for better GPU performance
-        self.all_toks = prepend + standard_toks + ["<null_1>"] + append
+        self.vocab = VOCAB
+        self.tok_to_idx: dict[str, int] = {t: i for i, t in enumerate(self.vocab)}
 
-        self.tok_to_idx = {tok: i for i, tok in enumerate(self.all_toks)}
+        self.cls_idx: int = self.tok_to_idx["<cls>"]
+        self.pad_idx: int = self.tok_to_idx["<pad>"]
+        self.eos_idx: int = self.tok_to_idx["<eos>"]
+        self.unk_idx: int = self.tok_to_idx["<unk>"]
+        self.mask_idx: int = self.tok_to_idx["<mask>"]
 
-        self.cls_idx = self.tok_to_idx["<cls>"]
-        self.eos_idx = self.tok_to_idx["<eos>"]
-        self.pad_idx = self.tok_to_idx["<pad>"]
-        self.unk_idx = self.tok_to_idx["<unk>"]
-        self.mask_idx = self.tok_to_idx["<mask>"]
+    @property
+    def vocab_size(self) -> int:
+        return len(self.vocab)
 
-    def get_idx(self, tok):
-        return self.tok_to_idx.get(tok, self.unk_idx)
+    def _encode_one(self, sequence: str) -> list[int]:
+        """Encode a single amino-acid string to a list of token indices."""
+        return (
+            [self.cls_idx]
+            + [self.tok_to_idx.get(c, self.unk_idx) for c in sequence]
+            + [self.eos_idx]
+        )
 
-    def get_tok(self, ind):
-        return self.all_toks[ind]
+    def encode(self, sequence: str) -> mx.array:
+        """Encode a single sequence, returning an ``mx.array`` of shape ``(1, L+2)``."""
+        return mx.array([self._encode_one(sequence)])
 
-    def encode(self, sequence):
-        return [self.cls_idx] + [self.get_idx(tok) for tok in sequence] + [self.eos_idx]
+    def batch_encode(self, sequences: list[str]) -> mx.array:
+        """Encode multiple sequences with right-padding.
 
-    def decode(self, indices):
-        return [self.get_tok(tok) for tok in indices]
+        Returns an ``mx.array`` of shape ``(batch, max_len + 2)`` where
+        shorter sequences are padded with ``<pad>`` tokens.
+        """
+        encoded = [self._encode_one(seq) for seq in sequences]
+        max_len = max(len(e) for e in encoded)
+        padded = [e + [self.pad_idx] * (max_len - len(e)) for e in encoded]
+        return mx.array(padded)
+
+    def decode(self, indices: mx.array | list[int]) -> list[str]:
+        """Decode token indices back to token strings."""
+        if isinstance(indices, mx.array):
+            indices = indices.tolist()
+        return [self.vocab[i] for i in indices]

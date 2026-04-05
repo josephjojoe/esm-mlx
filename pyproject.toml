@@ -1,0 +1,28 @@
+[project]
+name = "esm-mlx"
+version = "0.1.0"
+description = "ESM-2 protein language model for Apple MLX"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    "mlx>=0.22.0",
+    "numpy",
+    "safetensors",
+]
+
+[project.optional-dependencies]
+convert = [
+    "torch>=2.0",
+]
+test = [
+    "torch>=2.0",
+]
+benchmark = [
+    "torch>=2.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"

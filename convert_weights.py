@@ -1,29 +1,41 @@
+"""Convert PyTorch ESM-2 weights to MLX-compatible safetensors format.
+
+Downloads the official model from ``facebookresearch/esm`` via ``torch.hub``
+and saves the parameters as NumPy safetensors, stripping buffers that the
+MLX implementation recomputes (RoPE frequencies, bias_k/v).
+
+Usage::
+
+    python convert_weights.py --model esm2_t33_650M_UR50D --out esm2_t33_650M_UR50D.safetensors
+"""
+
 import argparse
-import torch
+
 import numpy as np
+import torch
 from safetensors.numpy import save_file
 
-# Keys to skip: tied weights, RoPE buffers, non-parameters
+# Keys to skip: RoPE buffers recomputed by MLX, and unused bias projections.
 SKIP_SUFFIXES = (
-    "rot_emb.inv_freq",  # MLX RoPE computes its own
+    "rot_emb.inv_freq",
     "bias_k",
     "bias_v",
 )
 
 
-def load_fair_model(model_name):
-    model, alphabet = torch.hub.load(
-        "facebookresearch/esm", model_name
-    )
+def load_fair_model(model_name: str):
+    """Download and return a PyTorch ESM-2 model from torch.hub."""
+    model, alphabet = torch.hub.load("facebookresearch/esm", model_name)
     model.eval()
     return model
 
 
-def convert(model_name, out_path):
+def convert(model_name: str, out_path: str) -> None:
+    """Convert a PyTorch ESM-2 checkpoint to safetensors."""
     print(f"Loading {model_name}...")
     model = load_fair_model(model_name)
 
-    weights = {}
+    weights: dict[str, np.ndarray] = {}
     for name, param in model.named_parameters():
         if name.endswith(SKIP_SUFFIXES):
             print(f"  skip: {name}")
@@ -39,8 +51,20 @@ def convert(model_name, out_path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="esm2_t33_650M_UR50D")
-    parser.add_argument("--out", default="weights.safetensors")
+    parser = argparse.ArgumentParser(
+        description="Convert PyTorch ESM-2 weights to MLX safetensors format."
+    )
+    parser.add_argument(
+        "--model",
+        default="esm2_t33_650M_UR50D",
+        help="Model name from facebookresearch/esm (default: esm2_t33_650M_UR50D)",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Output path (default: <model>.safetensors)",
+    )
     args = parser.parse_args()
-    convert(args.model, args.out)
+
+    out_path = args.out or f"{args.model}.safetensors"
+    convert(args.model, out_path)

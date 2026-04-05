@@ -2,3 +2,8 @@ drafts/
 *.safetensors
 __pycache__/
 *.csv
+*.egg-info/
+dist/
+build/
+.venv/
+.env
