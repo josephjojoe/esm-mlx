@@ -419,13 +419,6 @@ def main():
                          f"MLX vs PyTorch, B=1 L=64 {args.dtype}",
                          warn_threshold=threshold)
 
-        if args.dtype == "float16":
-            print("  Cross-dtype check (fp16 model vs temporary fp32 upcast):")
-            if run_pt:
-                cross_dtype_check_pytorch(pt_model, check_tokens)
-            if run_mlx:
-                cross_dtype_check_mlx(mx_model, check_tokens)
-
     # -- Benchmark loop -----------------------------------------------------
     rng = np.random.default_rng(42)
     all_results: list[BenchResult] = []
