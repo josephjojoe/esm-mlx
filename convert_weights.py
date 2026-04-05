@@ -1,15 +1,19 @@
-"""Convert PyTorch ESM-2 weights to MLX-compatible safetensors format.
+"""Convert ESM-2 PyTorch weights to MLX-compatible safetensors.
 
-Downloads the official model from ``facebookresearch/esm`` via ``torch.hub``
-and saves the parameters as NumPy safetensors, stripping buffers that the
-MLX implementation recomputes (RoPE frequencies, bias_k/v).
+Downloads checkpoints directly from Meta's CDN and converts the state dict
+without instantiating the full PyTorch model — roughly half the memory of
+the previous torch.hub.load approach.  Uses mmap when available (PyTorch
+>= 2.1) so tensors are paged in from disk on demand.
 
 Usage::
 
     python3 convert_weights.py --model esm2_t33_650M_UR50D
+    python3 convert_weights.py --all
+    python3 convert_weights.py --all --upload josephjojoe/esm-mlx
 """
 
 import argparse
+import gc
 import os
 
 import numpy as np
@@ -18,7 +22,9 @@ from safetensors.numpy import save_file
 
 from esm_mlx import MODEL_CONFIGS
 
-# Keys to skip: RoPE buffers recomputed by MLX, and unused bias projections.
+MODEL_URL = "https://dl.fbaipublicfiles.com/fair-esm/models/{}.pt"
+REGRESSION_URL = "https://dl.fbaipublicfiles.com/fair-esm/regression/{}-contact-regression.pt"
+
 SKIP_SUFFIXES = (
     "rot_emb.inv_freq",
     "bias_k",
@@ -26,55 +32,125 @@ SKIP_SUFFIXES = (
 )
 
 
-def load_fair_model(model_name: str):
-    """Download and return a PyTorch ESM-2 model from torch.hub."""
-    model, alphabet = torch.hub.load("facebookresearch/esm", model_name)
-    model.eval()
-    return model
+def _torch_load(path: str):
+    """Load a checkpoint, using mmap for memory efficiency when available."""
+    try:
+        return torch.load(path, map_location="cpu", mmap=True, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu", weights_only=False)
+
+
+def _download(url: str) -> str:
+    """Download to the torch hub cache, returning the local path."""
+    cache_dir = os.path.join(torch.hub.get_dir(), "checkpoints")
+    os.makedirs(cache_dir, exist_ok=True)
+    filename = os.path.basename(url)
+    local = os.path.join(cache_dir, filename)
+    if not os.path.exists(local):
+        print(f"  Downloading {filename}...")
+        torch.hub.download_url_to_file(url, local)
+    else:
+        print(f"  Cached: {filename}")
+    return local
 
 
 def convert(model_name: str, out_path: str) -> None:
-    """Convert a PyTorch ESM-2 checkpoint to safetensors."""
-    print(f"Loading {model_name}...")
-    model = load_fair_model(model_name)
+    """Convert a single ESM-2 checkpoint to safetensors."""
+    print(f"\nConverting {model_name}...")
+
+    model_path = _download(MODEL_URL.format(model_name))
+    data = _torch_load(model_path)
+    state_dict = data.get("model", data)
+    del data
+
+    try:
+        reg_path = _download(REGRESSION_URL.format(model_name))
+        reg_data = _torch_load(reg_path)
+        state_dict.update(reg_data.get("model", reg_data))
+        del reg_data
+    except Exception as e:
+        print(f"  No regression weights available: {e}")
+
+    gc.collect()
 
     weights: dict[str, np.ndarray] = {}
-    for name, param in model.named_parameters():
+    for name, tensor in state_dict.items():
         if name.endswith(SKIP_SUFFIXES):
-            print(f"  skip: {name}")
             continue
+        weights[name] = tensor.numpy()
+        print(f"  {name}  {tuple(weights[name].shape)}")
 
-        arr = param.detach().cpu().numpy()
-        weights[name] = arr
-        print(f"  {name} {arr.shape}")
+    del state_dict
+    gc.collect()
 
-    print(f"\nSaving {len(weights)} tensors to {out_path}")
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     save_file(weights, out_path)
-    print("Done.")
+    size_mb = os.path.getsize(out_path) / (1024 ** 2)
+    print(f"  Saved {len(weights)} tensors -> {out_path} ({size_mb:.0f} MB)")
+
+    del weights
+    gc.collect()
+
+
+def upload(repo_id: str, weights_dir: str = "weights") -> None:
+    """Upload all .safetensors files to a single HuggingFace repo."""
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    api.create_repo(repo_id, exist_ok=True)
+
+    files = sorted(f for f in os.listdir(weights_dir) if f.endswith(".safetensors"))
+    if not files:
+        print("No .safetensors files found in", weights_dir)
+        return
+
+    for f in files:
+        path = os.path.join(weights_dir, f)
+        size_mb = os.path.getsize(path) / (1024 ** 2)
+        print(f"  Uploading {f} ({size_mb:.0f} MB)...")
+        api.upload_file(
+            path_or_fileobj=path,
+            path_in_repo=f,
+            repo_id=repo_id,
+        )
+
+    print(f"\nDone — https://huggingface.co/{repo_id}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Convert PyTorch ESM-2 weights to MLX safetensors format."
+        description="Convert PyTorch ESM-2 weights to MLX safetensors.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--model",
-        default="esm2_t33_650M_UR50D",
-        help="Model name from facebookresearch/esm (default: esm2_t33_650M_UR50D)",
-    )
-    parser.add_argument(
-        "--out",
-        default=None,
-        help="Output path (default: weights/<model>.safetensors)",
-    )
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--model", help="Single model name (e.g. esm2_t33_650M_UR50D)")
+    group.add_argument("--all", action="store_true",
+                       help="Convert all supported models (smallest first)")
+    parser.add_argument("--out", default=None,
+                        help="Output path (only with --model)")
+    parser.add_argument("--upload", metavar="REPO_ID",
+                        help="Upload converted weights to HuggingFace repo")
     args = parser.parse_args()
 
-    if args.model not in MODEL_CONFIGS:
-        parser.error(
-            f"Unknown model {args.model!r}. "
-            f"Choose from: {list(MODEL_CONFIGS)}"
-        )
+    if args.all:
+        models = list(MODEL_CONFIGS)
+    else:
+        if args.model not in MODEL_CONFIGS:
+            parser.error(
+                f"Unknown model {args.model!r}. "
+                f"Choose from: {list(MODEL_CONFIGS)}"
+            )
+        models = [args.model]
 
-    out_path = args.out or os.path.join("weights", f"{args.model}.safetensors")
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    convert(args.model, out_path)
+    for name in models:
+        out_path = (
+            args.out if (args.out and not args.all)
+            else os.path.join("weights", f"{name}.safetensors")
+        )
+        if os.path.exists(out_path):
+            print(f"\nSkipping {name} (already exists: {out_path})")
+            continue
+        convert(name, out_path)
+
+    if args.upload:
+        upload(args.upload)

@@ -20,7 +20,7 @@ This is a from-scratch MLX implementation of Meta's [ESM-2](https://github.com/f
 Requires Python 3.10+ and an Apple Silicon Mac.
 
 ```bash
-git clone https://github.com/jojoe-ainmo/esm-mlx.git
+git clone https://github.com/josephjojoe/esm-mlx.git
 cd esm-mlx
 pip install -e .
 ```
