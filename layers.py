@@ -34,7 +34,7 @@ class MultiHeadAttention(nn.Module):
         scores = q @ k.transpose(0, 1, 3, 2)
 
         if mask is not None:
-            scores = scores + mask.reshape(B, 1, 1, T).astype(scores.dtype) * float('-inf')
+            scores = scores + mask.reshape(B, 1, 1, T).astype(scores.dtype) * -1e9
 
         weights = mx.softmax(scores.astype(mx.float32), axis=-1).astype(scores.dtype)
         out = weights @ v
@@ -47,9 +47,28 @@ class MultiHeadAttention(nn.Module):
 
         return out, weights
 
-class TransformerLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
 
-    def __call__(self, x):
-        pass
+class TransformerLayer(nn.Module):
+    def __init__(self, embed_dim, ffn_dim, num_heads):
+        super().__init__()
+        self.self_attn = MultiHeadAttention(embed_dim, num_heads)
+        self.self_attn_layer_norm = nn.LayerNorm(embed_dim)
+        self.fc1 = nn.Linear(embed_dim, ffn_dim)
+        self.fc2 = nn.Linear(ffn_dim, embed_dim)
+        self.final_layer_norm = nn.LayerNorm(embed_dim)
+
+    def __call__(self, x, mask=None, need_head_weights=False):
+        # Attention block
+        residual = x
+        x = self.self_attn_layer_norm(x)
+        x, attn = self.self_attn(x, mask=mask, need_head_weights=need_head_weights)
+        x = residual + x
+
+        # FFN block
+        residual = x
+        x = self.final_layer_norm(x)
+        x = nn.gelu(self.fc1(x))
+        x = self.fc2(x)
+        x = residual + x
+
+        return x, attn
