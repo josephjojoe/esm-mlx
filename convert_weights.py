@@ -1,7 +1,7 @@
 import argparse
 import torch
 import numpy as np
-from mlx.utils import save_safetensors
+from safetensors.numpy import save_file
 
 # Keys to skip: tied weights, RoPE buffers, non-parameters
 SKIP_KEYS = {
@@ -16,7 +16,7 @@ SKIP_SUFFIXES = (
 
 
 def load_fair_model(model_name):
-    model, alphabet, batch_converter = torch.hub.load(
+    model, alphabet = torch.hub.load(
         "facebookresearch/esm", model_name
     )
     model.eval()
@@ -38,7 +38,7 @@ def convert(model_name, out_path):
         print(f"  {name} {arr.shape}")
 
     print(f"\nSaving {len(weights)} tensors to {out_path}")
-    save_safetensors(out_path, weights)
+    save_file(weights, out_path)
     print("Done.")
 
 
