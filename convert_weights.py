@@ -4,9 +4,7 @@ import numpy as np
 from safetensors.numpy import save_file
 
 # Keys to skip: tied weights, RoPE buffers, non-parameters
-SKIP_KEYS = {
-    "lm_head.weight",  # tied to embed_tokens.weight
-}
+SKIP_KEYS = set()
 
 SKIP_SUFFIXES = (
     "rot_emb.inv_freq",  # MLX RoPE computes its own
@@ -36,6 +34,10 @@ def convert(model_name, out_path):
         arr = param.detach().cpu().numpy()
         weights[name] = arr
         print(f"  {name} {arr.shape}")
+
+    # PyTorch deduplicates tied params; re-add lm_head.weight from embed_tokens
+    if "lm_head.weight" not in weights and "embed_tokens.weight" in weights:
+        weights["lm_head.weight"] = weights["embed_tokens.weight"].copy()
 
     print(f"\nSaving {len(weights)} tensors to {out_path}")
     save_file(weights, out_path)

@@ -3,22 +3,22 @@ import numpy as np
 import torch
 
 import mlx.core as mx
-from mlx.utils import load_safetensors
 
 from model import ESM2
 
 
 def load_pytorch_model():
-    model, alphabet, batch_converter = torch.hub.load(
+    model, alphabet = torch.hub.load(
         "facebookresearch/esm", "esm2_t33_650M_UR50D"
     )
     model.eval()
+    batch_converter = alphabet.get_batch_converter()
     return model, alphabet, batch_converter
 
 
 def load_mlx_model(weights_path):
     model = ESM2()
-    weights = load_safetensors(weights_path)
+    weights = mx.load(weights_path)
     model.load_weights(list(weights.items()))
     return model
 
