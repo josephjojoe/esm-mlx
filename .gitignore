@@ -1,3 +1,4 @@
 drafts/
 *.safetensors
 __pycache__/
+*.csv
