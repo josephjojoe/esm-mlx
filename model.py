@@ -28,9 +28,7 @@ class ESM2(nn.Module):
 
         self.emb_layer_norm_after = nn.LayerNorm(embed_dim)
 
-        self.lm_head = RobertaLMHead(
-            embed_dim, alphabet_size, self.embed_tokens.weight
-        )
+        self.lm_head = RobertaLMHead(embed_dim, alphabet_size)
 
         self.contact_head = ContactPredictionHead(
             num_layers * attention_heads,
@@ -57,7 +55,7 @@ class ESM2(nn.Module):
                 attn_weights.append(attn)
 
         x = self.emb_layer_norm_after(x)
-        logits = self.lm_head(x)
+        logits = self.lm_head(x, self.embed_tokens.weight)
 
         result = {"logits": logits}
 

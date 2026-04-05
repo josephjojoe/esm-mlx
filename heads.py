@@ -14,18 +14,17 @@ def apc(x):
 
 
 class RobertaLMHead(nn.Module):
-    def __init__(self, embed_dim, output_dim, embed_tokens_weight):
+    def __init__(self, embed_dim, output_dim):
         super().__init__()
         self.dense = nn.Linear(embed_dim, embed_dim)
         self.layer_norm = nn.LayerNorm(embed_dim)
-        self.weight = embed_tokens_weight
         self.bias = mx.zeros(output_dim)
 
-    def __call__(self, x):
+    def __call__(self, x, embed_weight):
         x = self.dense(x)
         x = nn.gelu(x)
         x = self.layer_norm(x)
-        x = x @ self.weight.T + self.bias
+        x = x @ embed_weight.T + self.bias
         return x
 
 
