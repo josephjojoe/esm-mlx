@@ -16,8 +16,36 @@ class MultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
         self.rope = nn.RoPE(self.head_dim, traditional=False, base=10000)
 
-    def __call__(self, x):
-        pass
+    
+    def __call__(self, x, mask=None, need_head_weights=False):
+        B, T, _ = x.shape
+
+        q = self.q_proj(x) * self.scale
+        k = self.k_proj(x)
+        v = self.v_proj(x)
+
+        q = q.reshape(B, T, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        k = k.reshape(B, T, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        v = v.reshape(B, T, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+
+        q = self.rope(q)
+        k = self.rope(k)
+
+        scores = q @ k.transpose(0, 1, 3, 2)
+
+        if mask is not None:
+            scores = scores + mask.reshape(B, 1, 1, T).astype(scores.dtype) * float('-inf')
+
+        weights = mx.softmax(scores.astype(mx.float32), axis=-1).astype(scores.dtype)
+        out = weights @ v
+
+        out = out.transpose(0, 2, 1, 3).reshape(B, T, -1)
+        out = self.out_proj(out)
+
+        if not need_head_weights:
+            weights = weights.mean(axis=1)
+
+        return out, weights
 
 class TransformerLayer(nn.Module):
     def __init__(self):
