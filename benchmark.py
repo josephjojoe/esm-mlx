@@ -1,22 +1,3 @@
-"""
-Benchmark MLX ESM-2 vs PyTorch ESM-2 (MPS) inference latency.
-
-Methodology:
-  - Inputs are random amino-acid tokens (deterministic seed), avoiding special
-    tokens so both models exercise the full transformer stack.
-  - Warmup iterations JIT-compile kernels and fill caches before timed runs.
-  - MLX: mx.eval() forces lazy graph evaluation and blocks until the GPU is done.
-    PyTorch: torch.mps.synchronize() drains the MPS command queue.
-  - GC is disabled during timed regions to remove collector jitter.
-  - Reports median (robust to outliers) plus p90/p99 tail latencies and
-    throughput in tokens/second.
-
-Usage:
-    python benchmark.py --weights weights.safetensors
-    python benchmark.py --weights weights.safetensors --csv results.csv
-    python benchmark.py --weights weights.safetensors --mlx-only
-"""
-
 import argparse
 import csv
 import gc
@@ -38,7 +19,7 @@ import numpy as np
 WARMUP_ITERS = 10
 BENCH_ITERS = 50
 SEQUENCE_LENGTHS = [64, 128, 256, 512, 1024]
-BATCH_SIZES = [1, 4]
+BATCH_SIZES = [1, 4, 8]
 VALID_TOKEN_RANGE = (4, 24)  # amino-acid indices; avoids cls/pad/eos/unk/mask
 
 
@@ -223,6 +204,8 @@ def load_mlx_model(weights_path: str):
 
     n_params = sum(v.size for _, v in mx.utils.tree_flatten(model.parameters()))
     print(f"  MLX params:     {n_params / 1e6:.1f}M")
+
+    model.__call__ = mx.compile(model.__call__, inputs=model.state)
     return model
 
 
@@ -255,7 +238,7 @@ def mlx_logits_np(model, tokens_np: np.ndarray) -> np.ndarray:
     tokens = mx.array(tokens_np)
     out = model(tokens)
     mx.eval(out["logits"])
-    return np.array(out["logits"])
+    return np.array(out["logits"], dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------

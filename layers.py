@@ -20,7 +20,7 @@ class MultiHeadAttention(nn.Module):
     def __call__(self, x, mask=None, need_head_weights=False):
         B, T, _ = x.shape
 
-        q = self.q_proj(x) * self.scale
+        q = self.q_proj(x)
         k = self.k_proj(x)
         v = self.v_proj(x)
 
@@ -31,19 +31,23 @@ class MultiHeadAttention(nn.Module):
         q = self.rope(q)
         k = self.rope(k)
 
-        scores = q @ k.transpose(0, 1, 3, 2)
-
-        if mask is not None:
-            scores = scores + mask.reshape(B, 1, 1, T).astype(scores.dtype) * -1e9
-
-        weights = mx.softmax(scores.astype(mx.float32), axis=-1).astype(scores.dtype)
-        out = weights @ v
+        if need_head_weights:
+            scores = (q * self.scale) @ k.transpose(0, 1, 3, 2)
+            if mask is not None:
+                scores = scores + mask.reshape(B, 1, 1, T).astype(scores.dtype) * -1e9
+            weights = mx.softmax(scores.astype(mx.float32), axis=-1).astype(scores.dtype)
+            out = weights @ v
+        else:
+            sdpa_mask = None
+            if mask is not None:
+                sdpa_mask = mask.reshape(B, 1, 1, T).astype(q.dtype) * -1e9
+            out = mx.fast.scaled_dot_product_attention(
+                q, k, v, scale=self.scale, mask=sdpa_mask,
+            )
+            weights = None
 
         out = out.transpose(0, 2, 1, 3).reshape(B, T, -1)
         out = self.out_proj(out)
-
-        if not need_head_weights:
-            weights = weights.mean(axis=1)
 
         return out, weights
 
