@@ -10,6 +10,7 @@ dependencies = [
     "mlx>=0.22.0",
     "numpy",
     "safetensors",
+    "huggingface_hub",
 ]
 
 [project.optional-dependencies]

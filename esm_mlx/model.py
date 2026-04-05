@@ -4,8 +4,12 @@ Supports all six ESM-2 architectures (8M through 15B) with optional contact
 prediction via stacked attention maps.
 """
 
+import os
+
 import mlx.core as mx
 import mlx.nn as nn
+
+HF_REPO_ID = "josephjojoe/esm-mlx"
 
 from .layers import MultiHeadAttention, TransformerLayer
 from .heads import RobertaLMHead, ContactPredictionHead
@@ -172,10 +176,14 @@ class ESM2(nn.Module):
     ) -> "ESM2":
         """Load a pretrained ESM-2 model.
 
+        Downloads weights from HuggingFace automatically if no local copy
+        is found.
+
         Args:
             model_name: One of the keys in ``MODEL_CONFIGS``.
-            weights_path: Path to a ``.safetensors`` file produced by
-                ``convert_weights.py``. Defaults to ``weights/<model_name>.safetensors``.
+            weights_path: Explicit path to a ``.safetensors`` file.  When
+                ``None``, checks ``weights/<model_name>.safetensors`` locally,
+                then falls back to downloading from HuggingFace.
 
         Returns:
             An ``ESM2`` instance with loaded weights.
@@ -190,7 +198,16 @@ class ESM2(nn.Module):
         model = cls(**config)
 
         if weights_path is None:
-            weights_path = f"weights/{model_name}.safetensors"
+            local_path = f"weights/{model_name}.safetensors"
+            if os.path.exists(local_path):
+                weights_path = local_path
+            else:
+                from huggingface_hub import hf_hub_download
+
+                weights_path = hf_hub_download(
+                    repo_id=HF_REPO_ID,
+                    filename=f"{model_name}.safetensors",
+                )
 
         weights = mx.load(weights_path)
         model.load_weights(list(weights.items()))

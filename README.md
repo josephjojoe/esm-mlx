@@ -31,21 +31,9 @@ To also install PyTorch (needed for weight conversion, equivalence checking, and
 pip install -e ".[convert]"
 ```
 
-## Getting Weights
-
-Convert the official PyTorch weights to MLX-compatible safetensors:
-
-```bash
-python3 convert_weights.py --model esm2_t33_650M_UR50D
-```
-
-This downloads the model from `torch.hub` and saves `weights/esm2_t33_650M_UR50D.safetensors`. For the 3B model:
-
-```bash
-python3 convert_weights.py --model esm2_t36_3B_UR50D
-```
-
 ## Quick Start
+
+Weights are downloaded automatically from [HuggingFace](https://huggingface.co/josephjojoe/esm-mlx) on first use — no manual conversion needed.
 
 ```python
 import mlx.core as mx
@@ -86,6 +74,16 @@ For maximum throughput, compile the model forward pass:
 ```python
 model.__call__ = mx.compile(model.__call__, inputs=model.state)
 ```
+
+## Converting Weights Manually
+
+If you prefer to convert weights yourself from the official PyTorch checkpoints (instead of downloading from HuggingFace):
+
+```bash
+python3 convert_weights.py --model esm2_t33_650M_UR50D
+```
+
+This downloads the model from `torch.hub` and saves `weights/esm2_t33_650M_UR50D.safetensors`. If a local file exists in `weights/`, `from_pretrained` will use it instead of downloading from HuggingFace.
 
 ## Equivalence Checking
 
@@ -163,7 +161,7 @@ See `python3 benchmark.py --help` for options (dtype, batch sizes, sequence leng
 The main model class.
 
 - **`ESM2(num_layers, embed_dim, attention_heads, ...)`** — Construct with explicit config.
-- **`ESM2.from_pretrained(model_name, weights_path=None)`** — Load a pretrained model by name.
+- **`ESM2.from_pretrained(model_name, weights_path=None)`** — Load a pretrained model by name. Downloads weights from [HuggingFace](https://huggingface.co/josephjojoe/esm-mlx) automatically if not found locally.
 - **`model(tokens, return_contacts=False)`** — Forward pass. Returns `{"logits": ...}`, or `{"logits": ..., "contacts": ...}` when `return_contacts=True`.
 - **`model.predict_contacts(tokens)`** — Shorthand for contact prediction only.
 
