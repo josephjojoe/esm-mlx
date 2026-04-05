@@ -2,7 +2,7 @@
 
 ESM-2 protein language model running natively on Apple Silicon via [MLX](https://github.com/ml-explore/mlx).
 
-This is a from-scratch MLX implementation of Meta's [ESM-2](https://github.com/facebookresearch/esm) (Evolutionary Scale Modeling), the state-of-the-art protein language model. It supports masked language modeling and residue–residue contact prediction, and runs **1.2–1.8x faster** than PyTorch on MPS on the same hardware.
+This is a from-scratch MLX implementation of Meta's [ESM-2](https://github.com/facebookresearch/esm) (Evolutionary Scale Modeling), the state-of-the-art protein language model. It supports masked language modeling and residue–residue contact prediction, and runs **1.2–3.4x faster** than PyTorch on MPS on the same hardware.
 
 ## Supported Models
 
@@ -101,9 +101,9 @@ On non-padding positions, typical max error is ~3e-3 (normal float32 drift acros
 
 ## Benchmarks
 
-Inference latency for ESM-2 650M on Apple Silicon (M-series), MLX vs PyTorch MPS, fp32. Each cell shows median latency in ms over 50 iterations after 10 warmup passes.
+All benchmarks: ESM-2 650M on M2 Pro (16 GB), MLX 0.30.6 vs PyTorch 2.10.0 MPS. Median latency over 50 iterations after 10 warmup passes.
 
-### Median Latency (ms)
+### Float32
 
 | Batch | Seq Len | MLX | PyTorch MPS | Speedup |
 |-------|---------|-----|-------------|---------|
@@ -119,12 +119,29 @@ Inference latency for ESM-2 650M on Apple Silicon (M-series), MLX vs PyTorch MPS
 | 8 | 512 | 1305.0 | 2057.8 | 1.58x |
 | 8 | 1024 | 2783.9 | 4935.6 | **1.77x** |
 
-The MLX advantage grows with batch size and sequence length. At batch=8, seq=1024 the MLX port is **1.77x faster** than PyTorch on MPS.
+### Float16
+
+| Batch | Seq Len | MLX | PyTorch MPS | Speedup |
+|-------|---------|-----|-------------|---------|
+| 8 | 64 | 149.6 | 218.2 | 1.46x |
+| 8 | 128 | 273.3 | 414.8 | 1.52x |
+| 8 | 256 | 522.1 | 868.0 | 1.66x |
+| 8 | 512 | 1039.9 | 2012.4 | 1.94x |
+| 8 | 1024 | 2186.3 | 5266.7 | 2.41x |
+| 16 | 256 | 1006.8 | 1738.5 | 1.73x |
+| 16 | 512 | 2051.9 | 4123.9 | 2.01x |
+| 16 | 1024 | 4349.1 | 14759.5 | **3.39x** |
+| 32 | 256 | 1985.4 | 3573.3 | 1.80x |
+| 32 | 512 | 4081.2 | 8295.5 | 2.03x |
+| 32 | 1024 | 8678.4 | OOM | — |
+
+FP16 widens the gap significantly. The **3.39x** result at batch=16, seq=1024 likely reflects PyTorch MPS thrashing near its memory ceiling — it OOMs entirely one step later at batch=32. MLX's unified-memory allocation avoids this cliff and continues to scale linearly up to batch=192 at seq=1024, sustaining ~3,784 tok/s on 16 GB.
 
 Run your own benchmarks:
 
 ```bash
 python benchmark.py --csv results.csv
+python benchmark.py --dtype float16 --csv results_fp16.csv
 ```
 
 See `python benchmark.py --help` for options (dtype, batch sizes, sequence lengths, etc.).
