@@ -41,7 +41,7 @@ class ESM2(nn.Module):
         padding_mask = tokens == self.padding_idx
         mask = padding_mask if padding_mask.any() else None
 
-        x = self.embed_tokens(tokens)
+        x = self.embed_tokens(tokens) * 0.88
 
         if mask is not None:
             x = x * (~mx.expand_dims(mask, -1)).astype(x.dtype)
