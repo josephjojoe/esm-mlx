@@ -149,6 +149,8 @@ All benchmarks: ESM-2 650M on M2 Pro (16 GB), MLX 0.30.6 vs PyTorch 2.10.0 MPS. 
 
 FP16 widens the gap significantly. The **3.39x** result at batch=16, seq=1024 likely reflects PyTorch MPS thrashing near its memory ceiling — it OOMs entirely one step later at batch=32. MLX's unified-memory allocation avoids this cliff and continues to scale linearly up to batch=192 at seq=1024, sustaining ~3,784 tok/s on 16 GB.
 
+![FP16 benchmark chart](figures/benchmark_chart_fp16_seq1024.png)
+
 Run your own benchmarks:
 
 ```bash
