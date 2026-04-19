@@ -21,15 +21,10 @@ import torch
 from safetensors.numpy import save_file
 
 from esm_mlx import MODEL_CONFIGS
+from esm_mlx.model import _rename_fairseq_key
 
 MODEL_URL = "https://dl.fbaipublicfiles.com/fair-esm/models/{}.pt"
 REGRESSION_URL = "https://dl.fbaipublicfiles.com/fair-esm/regression/{}-contact-regression.pt"
-
-SKIP_SUFFIXES = (
-    "rot_emb.inv_freq",
-    "bias_k",
-    "bias_v",
-)
 
 
 def _torch_load(path: str):
@@ -75,10 +70,11 @@ def convert(model_name: str, out_path: str) -> None:
 
     weights: dict[str, np.ndarray] = {}
     for name, tensor in state_dict.items():
-        if name.endswith(SKIP_SUFFIXES):
+        mlx_name = _rename_fairseq_key(name)
+        if mlx_name is None:
             continue
-        weights[name] = tensor.numpy()
-        print(f"  {name}  {tuple(weights[name].shape)}")
+        weights[mlx_name] = tensor.numpy()
+        print(f"  {mlx_name}  {tuple(weights[mlx_name].shape)}")
 
     del state_dict
     gc.collect()

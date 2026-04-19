@@ -201,9 +201,11 @@ def load_mlx_model(weights_path: str, dtype: str = "float32"):
     import mlx.core as mx
     from mlx.utils import tree_flatten, tree_map
     from esm_mlx import ESM2
+    from esm_mlx.model import _canonicalise_weights
 
     model = ESM2()
-    weights = mx.load(weights_path)
+    raw = mx.load(weights_path)
+    weights = _canonicalise_weights(raw.items())
     model.load_weights(list(weights.items()))
 
     if dtype == "float16":

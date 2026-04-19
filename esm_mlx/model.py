@@ -14,6 +14,56 @@ HF_REPO_ID = "josephjojoe/esm-mlx"
 from .layers import MultiHeadAttention, TransformerLayer
 from .heads import RobertaLMHead, ContactPredictionHead
 
+# Meta's fairseq checkpoints nest everything under ``encoder.sentence_encoder.``
+# (transformer body) or ``encoder.`` (lm_head), plus a handful of keys this
+# MLX port does not use.  The released HuggingFace checkpoints were originally
+# uploaded with these raw names, so we canonicalise at load time rather than
+# forcing users to re-download.  Keys already in the MLX schema pass through
+# unchanged.
+_FAIRSEQ_PREFIXES = (
+    ("encoder.sentence_encoder.", ""),  # strip the fairseq body prefix
+    ("encoder.lm_head.", "lm_head."),  # lm_head lives at top level in MLX
+)
+
+# Weights that have no counterpart in the MLX model and should be dropped.
+#   - ``encoder.lm_head.weight``: fairseq stores the tied token-embedding
+#     matrix here, but our ``RobertaLMHead`` ties it to ``embed_tokens.weight``
+#     at forward time, so the extra copy is redundant.
+#   - ``*.rot_emb.inv_freq``: fairseq caches rotary inverse frequencies as
+#     buffers; MLX's ``nn.RoPE`` derives them analytically.
+#   - ``*.self_attn.bias_k`` / ``bias_v``: optional learned key/value biases
+#     that ESM-2 does not train.
+_FAIRSEQ_SKIP_KEYS = frozenset({"encoder.lm_head.weight"})
+_FAIRSEQ_SKIP_SUFFIXES = (
+    "rot_emb.inv_freq",
+    "self_attn.bias_k",
+    "self_attn.bias_v",
+)
+
+
+def _rename_fairseq_key(key: str) -> str | None:
+    """Return the MLX-schema key corresponding to a fairseq key, or ``None`` to skip.
+
+    Idempotent: MLX-format keys pass through unchanged.
+    """
+    if key in _FAIRSEQ_SKIP_KEYS or key.endswith(_FAIRSEQ_SKIP_SUFFIXES):
+        return None
+    for src, dst in _FAIRSEQ_PREFIXES:
+        if key.startswith(src):
+            return dst + key[len(src):]
+    return key
+
+
+def _canonicalise_weights(weights):
+    """Apply ``_rename_fairseq_key`` to an iterable of ``(key, array)`` pairs."""
+    out: dict[str, mx.array] = {}
+    for k, v in weights:
+        new_key = _rename_fairseq_key(k)
+        if new_key is None:
+            continue
+        out[new_key] = v
+    return out
+
 # Architecture configs keyed by the official Facebook Research model names.
 # Each maps to (num_layers, embed_dim, attention_heads, alphabet_size).
 MODEL_CONFIGS: dict[str, dict] = {
@@ -177,7 +227,9 @@ class ESM2(nn.Module):
         """Load a pretrained ESM-2 model.
 
         Downloads weights from HuggingFace automatically if no local copy
-        is found.
+        is found.  Accepts both fairseq-format checkpoints (keys nested
+        under ``encoder.sentence_encoder.``) and checkpoints already in the
+        MLX schema; the conversion is applied at load time.
 
         Args:
             model_name: One of the keys in ``MODEL_CONFIGS``.
@@ -209,7 +261,8 @@ class ESM2(nn.Module):
                     filename=f"{model_name}.safetensors",
                 )
 
-        weights = mx.load(weights_path)
+        raw = mx.load(weights_path)
+        weights = _canonicalise_weights(raw.items())
         model.load_weights(list(weights.items()))
         mx.eval(model.parameters())
 

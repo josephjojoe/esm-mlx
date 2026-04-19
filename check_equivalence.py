@@ -17,6 +17,7 @@ import torch
 import mlx.core as mx
 
 from esm_mlx import ESM2
+from esm_mlx.model import _canonicalise_weights
 
 PADDING_IDX = 1
 
@@ -34,7 +35,8 @@ def load_mlx_model(weights_path, dtype="float32"):
     from mlx.utils import tree_flatten, tree_map
 
     model = ESM2()
-    weights = mx.load(weights_path)
+    raw = mx.load(weights_path)
+    weights = _canonicalise_weights(raw.items())
     model.load_weights(list(weights.items()))
 
     if dtype == "float16":
